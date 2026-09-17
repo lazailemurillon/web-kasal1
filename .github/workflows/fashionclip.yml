@@ -47,7 +47,7 @@ jobs:
         run: |
           python fashionclip_worker/run_fashionclip.py
 
-            - name: Send result to Django
+      - name: Send result to Django
         env:
           DJANGO_CALLBACK_URL: https://web-kasal1-production.up.railway.app/api/fashionclip/callback/
           DJANGO_CALLBACK_SECRET: ${{ secrets.DJANGO_CALLBACK_SECRET }}
