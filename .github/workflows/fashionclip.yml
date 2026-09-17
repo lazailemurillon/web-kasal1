@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install FashionCLIP
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install fashion-clip==0.2.2
@@ -25,6 +25,12 @@ jobs:
           pip install numpy==1.26.4
           pip install Pillow==12.3.0
 
-      - name: Test FashionCLIP
+      - name: Run FashionCLIP worker
         run: |
-          python -c "from fashion_clip.fashion_clip import FashionCLIP; print('FashionCLIP package loaded successfully')"
+          python fashionclip_worker/run_fashionclip.py
+
+      - name: Upload embedding file
+        uses: actions/upload-artifact@v4
+        with:
+          name: gown-embeddings
+          path: fashionclip_worker/gown_embeddings.json
