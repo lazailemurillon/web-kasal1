@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import Gown, CustomerProfile, StaffProfile, Reservation
+from .models import (Gown,CustomerProfile,StaffProfile,Reservation,FashionSearchJob,)
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth import login, authenticate
 from django.contrib.auth.decorators import login_required
@@ -867,13 +867,13 @@ def delete_gown(request, gown_id):
 
 
 
-#AI
 # ============================================================
-# FIND SIMILAR GOWNS USING FASHIONCLIP
+# FASHIONCLIP AI SEARCH
 # ============================================================
 
 @require_POST
 def find_similar_gowns_view(request):
+
     photo = request.FILES.get("photo")
 
     if not photo:
@@ -896,18 +896,50 @@ def find_similar_gowns_view(request):
             status=500
         )
 
+    # --------------------------------------------------------
+    # CREATE UNIQUE JOB ID
+    # --------------------------------------------------------
+
     job_id = uuid.uuid4().hex
+
+    # --------------------------------------------------------
+    # CREATE DATABASE JOB
+    # --------------------------------------------------------
+
+    FashionSearchJob.objects.create(
+        job_id=job_id,
+        status="queued"
+    )
+
+    # --------------------------------------------------------
+    # DETERMINE FILE EXTENSION
+    # --------------------------------------------------------
 
     extension = os.path.splitext(photo.name)[1].lower()
 
     if extension not in [".jpg", ".jpeg", ".png", ".webp"]:
         extension = ".jpg"
 
-    github_path = f"fashionclip_worker/uploads/{job_id}{extension}"
+    github_path = (
+        f"fashionclip_worker/uploads/"
+        f"{job_id}{extension}"
+    )
 
     try:
+
+        # ----------------------------------------------------
+        # READ PHOTO
+        # ----------------------------------------------------
+
         photo_bytes = photo.read()
-        encoded_photo = base64.b64encode(photo_bytes).decode("utf-8")
+
+        encoded_photo = base64.b64encode(
+            photo_bytes
+        ).decode("utf-8")
+
+        # ----------------------------------------------------
+        # GITHUB AUTHENTICATION
+        # ----------------------------------------------------
 
         headers = {
             "Authorization": f"Bearer {github_token}",
@@ -915,16 +947,21 @@ def find_similar_gowns_view(request):
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
+        # ----------------------------------------------------
+        # UPLOAD PHOTO TO GITHUB
+        # ----------------------------------------------------
+
         github_url = (
-            f"https://api.github.com/repos/"
-            f"lazailemurillon/web-kasal1/contents/{github_path}"
+            "https://api.github.com/repos/"
+            "lazailemurillon/web-kasal1/contents/"
+            f"{github_path}"
         )
 
         upload_response = requests.put(
             github_url,
             headers=headers,
             json={
-                "message": f"Upload AI photo {job_id}",
+                "message": f"AI search photo {job_id}",
                 "content": encoded_photo,
                 "branch": "main",
             },
@@ -932,6 +969,17 @@ def find_similar_gowns_view(request):
         )
 
         if upload_response.status_code not in [200, 201]:
+
+            FashionSearchJob.objects.filter(
+                job_id=job_id
+            ).update(
+                status="failed",
+                error=(
+                    "Could not upload photo to GitHub: "
+                    + upload_response.text
+                )
+            )
+
             return JsonResponse(
                 {
                     "success": False,
@@ -940,6 +988,10 @@ def find_similar_gowns_view(request):
                 },
                 status=500
             )
+
+        # ----------------------------------------------------
+        # START FASHIONCLIP WORKFLOW
+        # ----------------------------------------------------
 
         workflow_url = (
             "https://api.github.com/repos/"
@@ -961,6 +1013,17 @@ def find_similar_gowns_view(request):
         )
 
         if workflow_response.status_code != 204:
+
+            FashionSearchJob.objects.filter(
+                job_id=job_id
+            ).update(
+                status="failed",
+                error=(
+                    "Could not start FashionCLIP workflow: "
+                    + workflow_response.text
+                )
+            )
+
             return JsonResponse(
                 {
                     "success": False,
@@ -970,15 +1033,37 @@ def find_similar_gowns_view(request):
                 status=500
             )
 
+        # ----------------------------------------------------
+        # MARK AS RUNNING
+        # ----------------------------------------------------
+
+        FashionSearchJob.objects.filter(
+            job_id=job_id
+        ).update(
+            status="running"
+        )
+
+        # ----------------------------------------------------
+        # RETURN JOB ID TO WEBSITE
+        # ----------------------------------------------------
+
         return JsonResponse(
             {
                 "success": True,
                 "job_id": job_id,
-                "status": "started",
+                "status": "running",
             }
         )
 
     except Exception as e:
+
+        FashionSearchJob.objects.filter(
+            job_id=job_id
+        ).update(
+            status="failed",
+            error=str(e)
+        )
+
         return JsonResponse(
             {
                 "success": False,
@@ -987,162 +1072,248 @@ def find_similar_gowns_view(request):
             status=500
         )
 
-def find_similar_gowns_status(request, job_id):
-    github_token = os.environ.get("GITHUB_TOKEN")
 
-    if not github_token:
+# ============================================================
+# FASHIONCLIP CALLBACK
+# GitHub Actions sends the finished result here
+# ============================================================
+
+@require_POST
+def fashionclip_callback(request):
+
+    # --------------------------------------------------------
+    # CHECK SECRET
+    # --------------------------------------------------------
+
+    auth_header = request.headers.get(
+        "Authorization",
+        ""
+    )
+
+    expected_token = os.environ.get(
+        "DJANGO_CALLBACK_SECRET"
+    )
+
+    if not expected_token:
         return JsonResponse(
             {
                 "success": False,
-                "status": "error",
-                "error": "GitHub token is not configured."
+                "error": "Callback secret is not configured."
             },
             status=500
         )
 
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    expected_header = f"Bearer {expected_token}"
+
+    if auth_header != expected_header:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Unauthorized."
+            },
+            status=401
+        )
+
+    # --------------------------------------------------------
+    # READ REQUEST
+    # --------------------------------------------------------
 
     try:
-        runs_url = (
-            "https://api.github.com/repos/"
-            "lazailemurillon/web-kasal1/actions/workflows/"
-            "fashionclip.yml/runs"
+
+        data = json.loads(
+            request.body
         )
 
-        response = requests.get(
-            runs_url,
-            headers=headers,
-            params={"per_page": 20},
-            timeout=30,
+    except json.JSONDecodeError:
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid JSON."
+            },
+            status=400
         )
 
-        if response.status_code != 200:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "status": "error",
-                    "error": "Could not check GitHub Actions."
-                },
-                status=500
-            )
+    job_id = data.get("job_id")
+    result = data.get("result")
 
-        runs = response.json().get("workflow_runs", [])
+    if not job_id:
 
-        target_run = None
-
-        for run in runs:
-            if run.get("display_title") == f"FashionCLIP {job_id}":
-                target_run = run
-                break
-
-        if not target_run:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "status": "queued",
-                    "job_id": job_id,
-                }
-            )
-
-        run_status = target_run.get("status")
-        conclusion = target_run.get("conclusion")
-
-        if run_status != "completed":
-            return JsonResponse(
-                {
-                    "success": True,
-                    "status": "running",
-                    "job_id": job_id,
-                }
-            )
-
-        if conclusion != "success":
-            return JsonResponse(
-                {
-                    "success": False,
-                    "status": "failed",
-                    "error": "FashionCLIP workflow failed."
-                }
-            )
-
-        result_path = f"fashionclip_worker/result_{job_id}.json"
-
-        result_url = (
-            "https://api.github.com/repos/"
-            "lazailemurillon/web-kasal1/contents/"
-            f"{result_path}"
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Missing job_id."
+            },
+            status=400
         )
 
-        result_response = requests.get(
-            result_url,
-            headers=headers,
-            timeout=30,
+    if result is None:
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Missing result."
+            },
+            status=400
         )
 
-        if result_response.status_code != 200:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "status": "running",
-                    "job_id": job_id,
-                }
-            )
+    # --------------------------------------------------------
+    # PARSE RESULT
+    # --------------------------------------------------------
 
-        result_data = result_response.json()
+    try:
 
-        encoded_content = result_data.get("content", "")
+        if isinstance(result, str):
+            result = json.loads(result)
 
-        if not encoded_content:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "status": "failed",
-                    "error": "FashionCLIP result is empty."
-                }
-            )
+    except json.JSONDecodeError:
 
-        result_json = base64.b64decode(
-            encoded_content.replace("\n", "")
-        ).decode("utf-8")
+        FashionSearchJob.objects.filter(
+            job_id=job_id
+        ).update(
+            status="failed",
+            error="FashionCLIP returned invalid JSON."
+        )
 
-        results = json.loads(result_json)
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "FashionCLIP result is invalid JSON."
+            },
+            status=400
+        )
 
-        gown_ids = []
+    # --------------------------------------------------------
+    # FIND JOB
+    # --------------------------------------------------------
 
-        for result in results:
-            filename = result.get("filename")
+    try:
 
-            if not filename:
-                continue
+        job = FashionSearchJob.objects.get(
+            job_id=job_id
+        )
 
-            for gown in Gown.objects.all():
-                if os.path.basename(gown.image.name) == filename:
-                    gown_ids.append(gown.id)
-                    break
+    except FashionSearchJob.DoesNotExist:
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Job not found."
+            },
+            status=404
+        )
+
+    # --------------------------------------------------------
+    # SAVE RESULT TO DATABASE
+    # --------------------------------------------------------
+
+    job.status = "completed"
+    job.results = result
+    job.error = ""
+    job.save()
+
+    # --------------------------------------------------------
+    # RETURN SUCCESS
+    # --------------------------------------------------------
+
+    return JsonResponse(
+        {
+            "success": True,
+            "job_id": job_id,
+            "status": "completed"
+        }
+    )
+
+
+# ============================================================
+# CHECK FASHIONCLIP RESULT
+# Website polls this endpoint
+# ============================================================
+
+def find_similar_gowns_status(request, job_id):
+
+    try:
+
+        job = FashionSearchJob.objects.get(
+            job_id=job_id
+        )
+
+    except FashionSearchJob.DoesNotExist:
+
+        return JsonResponse(
+            {
+                "success": False,
+                "status": "not_found",
+                "error": "AI search job not found."
+            },
+            status=404
+        )
+
+    # --------------------------------------------------------
+    # STILL RUNNING
+    # --------------------------------------------------------
+
+    if job.status in ["queued", "running"]:
 
         return JsonResponse(
             {
                 "success": True,
-                "status": "completed",
+                "status": job.status,
                 "job_id": job_id,
-                "gown_ids": gown_ids,
-                "results": results,
             }
         )
 
-    except Exception as e:
+    # --------------------------------------------------------
+    # FAILED
+    # --------------------------------------------------------
+
+    if job.status == "failed":
+
         return JsonResponse(
             {
                 "success": False,
-                "status": "error",
-                "error": str(e),
-            },
-            status=500
+                "status": "failed",
+                "job_id": job_id,
+                "error": job.error,
+            }
         )
+
+    # --------------------------------------------------------
+    # COMPLETED
+    # --------------------------------------------------------
+
+    results = job.results or []
+
+    gown_ids = []
+
+    for result in results:
+
+        filename = result.get("filename")
+
+        if not filename:
+            continue
+
+        for gown in Gown.objects.all():
+
+            if os.path.basename(
+                gown.image.name
+            ) == filename:
+
+                gown_ids.append(
+                    gown.id
+                )
+
+                break
+
+    return JsonResponse(
+        {
+            "success": True,
+            "status": "completed",
+            "job_id": job_id,
+            "gown_ids": gown_ids,
+            "results": results,
+        }
+    )
 
 #RESERVATION
 @login_required

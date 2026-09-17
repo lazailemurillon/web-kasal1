@@ -12,4 +12,5 @@ urlpatterns = [
     path("api/find-similar-gowns/",views.find_similar_gowns_view,name="find_similar_gowns"),
     path('booking/<int:gown_id>/', views.booking, name='booking'),
     path("api/find-similar-gowns-status/<str:job_id>/",views.find_similar_gowns_status,name="find_similar_gowns_status",),
+    path("api/fashionclip/callback/",views.fashionclip_callback,name="fashionclip_callback"),
 ]

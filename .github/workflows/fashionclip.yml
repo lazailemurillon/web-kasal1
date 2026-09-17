@@ -16,7 +16,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   fashionclip:
@@ -39,6 +39,7 @@ jobs:
           pip install transformers==4.30.2
           pip install numpy==1.26.4
           pip install Pillow==12.3.0
+          pip install requests
 
       - name: Run FashionCLIP worker
         env:
@@ -46,18 +47,35 @@ jobs:
         run: |
           python fashionclip_worker/run_fashionclip.py
 
-      - name: Rename result for this job
+      - name: Send result to Django
+        env:
+          DJANGO_CALLBACK_URL: ${{ secrets.DJANGO_CALLBACK_URL }}
+          DJANGO_CALLBACK_SECRET: ${{ secrets.DJANGO_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
         run: |
-          mv fashionclip_worker/fashion_results.json \
-             fashionclip_worker/result_${{ inputs.job_id }}.json
+          python - <<'PY'
+          import os
+          import requests
 
-      - name: Save AI result to repository
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          result_file = "fashionclip_worker/fashion_results.json"
 
-          git add fashionclip_worker/result_${{ inputs.job_id }}.json
+          with open(result_file, "r", encoding="utf-8") as f:
+              result = f.read()
 
-          git commit -m "Save FashionCLIP result ${{ inputs.job_id }}"
+          response = requests.post(
+              os.environ["DJANGO_CALLBACK_URL"],
+              headers={
+                  "Authorization":
+                      f"Bearer {os.environ['DJANGO_CALLBACK_SECRET']}"
+              },
+              json={
+                  "job_id": os.environ["JOB_ID"],
+                  "result": result
+              },
+              timeout=60
+          )
 
-          git push
+          response.raise_for_status()
+
+          print("FashionCLIP result successfully sent to Django.")
+          PY

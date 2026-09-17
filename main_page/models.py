@@ -170,3 +170,14 @@ class Reservation(models.Model):
 
     def __str__(self):
         return f"{self.customer_email} - {self.gown.name} - {self.date} {self.time_slot}"
+
+class FashionSearchJob(models.Model):
+    job_id = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=20, default="queued")
+    results = models.JSONField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.job_id
