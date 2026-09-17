@@ -1,5 +1,6 @@
 import os
 import tempfile
+import gc
 
 import numpy as np
 from PIL import Image
@@ -32,11 +33,7 @@ def get_fashionclip():
 
 def get_image_embedding(image_path):
     """
-    Creates a FashionCLIP embedding.
-
-    FashionCLIP captures overall fashion similarity including
-    garment type, silhouette, style, texture, pattern, color,
-    and other visual characteristics.
+    Creates a normalized FashionCLIP embedding.
     """
 
     fclip = get_fashionclip()
@@ -51,11 +48,10 @@ def get_image_embedding(image_path):
         dtype=np.float32
     )
 
-    # Normalize vector
     norm = np.linalg.norm(embedding)
 
     if norm != 0:
-        embedding = embedding / norm
+        embedding /= norm
 
     return embedding
 
@@ -68,16 +64,6 @@ def cosine_similarity(vector_a, vector_b):
     """
     Cosine similarity between two vectors.
     """
-
-    vector_a = np.asarray(
-        vector_a,
-        dtype=np.float32
-    )
-
-    vector_b = np.asarray(
-        vector_b,
-        dtype=np.float32
-    )
 
     norm_a = np.linalg.norm(vector_a)
     norm_b = np.linalg.norm(vector_b)
@@ -92,62 +78,46 @@ def cosine_similarity(vector_a, vector_b):
 
 
 # ============================================================
-# SIMPLE COLOR HISTOGRAM
+# COLOR HISTOGRAM
 # ============================================================
 
 def get_color_histogram(image_path):
     """
-    Extracts the overall color distribution of an image.
-
-    This is NOT used to require the same color.
-
-    It is only a secondary signal that helps ranking.
+    Creates the same 18 x 5 x 5 HSV histogram
+    as the original implementation.
     """
 
-    image = Image.open(
-        image_path
-    ).convert("RGB")
+    with Image.open(image_path) as image:
 
-    # Small image is enough for color distribution
-    image = image.resize((64, 64))
+        image = image.convert("RGB")
+        image = image.resize((64, 64))
 
-    image_array = np.asarray(
-        image,
-        dtype=np.float32
-    )
+        image_array = np.asarray(
+            image,
+            dtype=np.float32
+        )
 
-    # Convert RGB to HSV manually
     rgb = image_array / 255.0
 
     r = rgb[:, :, 0]
     g = rgb[:, :, 1]
     b = rgb[:, :, 2]
 
-    maximum = np.max(
-        rgb,
-        axis=2
-    )
-
-    minimum = np.min(
-        rgb,
-        axis=2
-    )
+    maximum = np.max(rgb, axis=2)
+    minimum = np.min(rgb, axis=2)
 
     difference = maximum - minimum
 
-    # --------------------------------------------------------
-    # Hue
-    # --------------------------------------------------------
+    # ========================================================
+    # HUE
+    # ========================================================
 
     hue = np.zeros_like(maximum)
 
     mask = difference != 0
 
     # Red
-    mask_r = (
-        mask &
-        (maximum == r)
-    )
+    mask_r = mask & (maximum == r)
 
     hue[mask_r] = (
         60 *
@@ -156,10 +126,7 @@ def get_color_histogram(image_path):
     ) % 360
 
     # Green
-    mask_g = (
-        mask &
-        (maximum == g)
-    )
+    mask_g = mask & (maximum == g)
 
     hue[mask_g] = (
         60 *
@@ -169,10 +136,7 @@ def get_color_histogram(image_path):
     ) % 360
 
     # Blue
-    mask_b = (
-        mask &
-        (maximum == b)
-    )
+    mask_b = mask & (maximum == b)
 
     hue[mask_b] = (
         60 *
@@ -181,9 +145,9 @@ def get_color_histogram(image_path):
         + 240
     ) % 360
 
-    # --------------------------------------------------------
-    # Saturation
-    # --------------------------------------------------------
+    # ========================================================
+    # SATURATION
+    # ========================================================
 
     saturation = np.zeros_like(maximum)
 
@@ -195,26 +159,26 @@ def get_color_histogram(image_path):
         maximum[nonzero_max]
     )
 
-    # --------------------------------------------------------
-    # Create histogram
-    # --------------------------------------------------------
+    # ========================================================
+    # HISTOGRAM
+    # ========================================================
 
     hue_bins = 18
     saturation_bins = 5
     value_bins = 5
 
     hue_index = np.minimum(
-        (hue / 360 * hue_bins).astype(int),
+        (hue / 360 * hue_bins).astype(np.int8),
         hue_bins - 1
     )
 
     saturation_index = np.minimum(
-        (saturation * saturation_bins).astype(int),
+        (saturation * saturation_bins).astype(np.int8),
         saturation_bins - 1
     )
 
     value_index = np.minimum(
-        (maximum * value_bins).astype(int),
+        (maximum * value_bins).astype(np.int8),
         value_bins - 1
     )
 
@@ -229,9 +193,9 @@ def get_color_histogram(image_path):
 
     # Put every pixel into its HSV bin
     for h, s, v in zip(
-        hue_index.flatten(),
-        saturation_index.flatten(),
-        value_index.flatten()
+        hue_index.flat,
+        saturation_index.flat,
+        value_index.flat
     ):
         histogram[h, s, v] += 1
 
@@ -241,7 +205,7 @@ def get_color_histogram(image_path):
     if total > 0:
         histogram /= total
 
-    return histogram.flatten()
+    return histogram.ravel()
 
 
 # ============================================================
@@ -250,26 +214,12 @@ def get_color_histogram(image_path):
 
 def color_similarity(color_a, color_b):
     """
-    Calculates color similarity.
+    Histogram intersection.
 
     1.0 = very similar color distribution
     0.0 = very different color distribution
-
-    IMPORTANT:
-    This is only a secondary score.
     """
 
-    color_a = np.asarray(
-        color_a,
-        dtype=np.float32
-    )
-
-    color_b = np.asarray(
-        color_b,
-        dtype=np.float32
-    )
-
-    # Histogram intersection
     similarity = np.minimum(
         color_a,
         color_b
@@ -293,12 +243,10 @@ def calculate_final_similarity(
     color_score
 ):
     """
-    Fashion/style is the dominant factor.
+    Same weighting as original:
 
-    FashionCLIP: 85%
-    Color:       15%
-
-    Color influences ranking but cannot dominate style.
+    FashionCLIP = 85%
+    Color = 15%
     """
 
     FASHION_WEIGHT = 0.85
@@ -323,42 +271,46 @@ def find_similar_gowns(
     """
     Finds gowns similar to the uploaded inspiration image.
 
-    Matching priority:
+    Matching:
 
-        85% FashionCLIP
-        15% color
-
-    Therefore:
-
-        silhouette/style = primary
-        color            = secondary
+    85% FashionCLIP
+    15% color
 
     Different colors are still allowed.
     """
 
-    # --------------------------------------------------------
-    # Save uploaded image temporarily
-    # --------------------------------------------------------
+    # ========================================================
+    # FILE EXTENSION
+    # ========================================================
 
-    suffix = ".jpg"
+    filename = uploaded_file.name.lower()
 
-    if uploaded_file.name.lower().endswith(".png"):
+    if filename.endswith(".png"):
         suffix = ".png"
 
-    elif uploaded_file.name.lower().endswith(".webp"):
+    elif filename.endswith(".webp"):
         suffix = ".webp"
 
-    with tempfile.NamedTemporaryFile(
-        suffix=suffix,
-        delete=False
-    ) as temp_file:
+    else:
+        suffix = ".jpg"
 
-        for chunk in uploaded_file.chunks():
-            temp_file.write(chunk)
+    # ========================================================
+    # SAVE UPLOADED IMAGE TEMPORARILY
+    # ========================================================
 
-        temp_image_path = temp_file.name
+    temp_image_path = None
 
     try:
+
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix,
+            delete=False
+        ) as temp_file:
+
+            for chunk in uploaded_file.chunks():
+                temp_file.write(chunk)
+
+            temp_image_path = temp_file.name
 
         # ====================================================
         # QUERY IMAGE
@@ -392,13 +344,16 @@ def find_similar_gowns(
             if not gown.image:
                 continue
 
+            gown_embedding = None
+            gown_color = None
+
             try:
 
                 gown_image_path = gown.image.path
 
-                # --------------------------------------------
-                # FashionCLIP
-                # --------------------------------------------
+                # ------------------------------------------------
+                # FASHIONCLIP
+                # ------------------------------------------------
 
                 gown_embedding = get_image_embedding(
                     gown_image_path
@@ -409,9 +364,9 @@ def find_similar_gowns(
                     gown_embedding
                 )
 
-                # --------------------------------------------
-                # Color
-                # --------------------------------------------
+                # ------------------------------------------------
+                # COLOR
+                # ------------------------------------------------
 
                 gown_color = get_color_histogram(
                     gown_image_path
@@ -422,9 +377,9 @@ def find_similar_gowns(
                     gown_color
                 )
 
-                # --------------------------------------------
-                # Combined score
-                # --------------------------------------------
+                # ------------------------------------------------
+                # FINAL SCORE
+                # ------------------------------------------------
 
                 final_score = calculate_final_similarity(
                     fashion_score,
@@ -432,18 +387,10 @@ def find_similar_gowns(
                 )
 
                 results.append({
-
                     "id": gown.id,
-
-                    # Final ranking score
                     "score": final_score,
-
-                    # Keep individual scores
                     "fashion_score": fashion_score,
-                    "color_score": color_score,
-
-                    # Debugging only
-                    "embedding": gown_embedding
+                    "color_score": color_score
                 })
 
             except Exception as e:
@@ -453,8 +400,16 @@ def find_similar_gowns(
                     f"{gown.id}: {e}"
                 )
 
+            finally:
+
+                # Release temporary arrays
+                gown_embedding = None
+                gown_color = None
+
+                gc.collect()
+
         # ====================================================
-        # SORT
+        # SORT RESULTS
         # ====================================================
 
         results.sort(
@@ -517,21 +472,12 @@ def find_similar_gowns(
         # ====================================================
 
         final_results = [
-
             {
                 "id": result["id"],
                 "score": result["score"],
-
-                # Optional:
-                # useful if you want to see why
-                # the gown ranked where it did.
-                "fashion_score":
-                    result["fashion_score"],
-
-                "color_score":
-                    result["color_score"]
+                "fashion_score": result["fashion_score"],
+                "color_score": result["color_score"]
             }
-
             for result in results[:top_k]
         ]
 
@@ -539,9 +485,15 @@ def find_similar_gowns(
 
     finally:
 
-        # ----------------------------------------------------
-        # Delete temporary uploaded image
-        # ----------------------------------------------------
+        # ====================================================
+        # DELETE TEMPORARY IMAGE
+        # ========================================================
 
-        if os.path.exists(temp_image_path):
+        if (
+            temp_image_path
+            and os.path.exists(temp_image_path)
+        ):
             os.remove(temp_image_path)
+
+        # Release unused Python memory
+        gc.collect()
