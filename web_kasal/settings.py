@@ -1,3 +1,4 @@
+import os
 """
 Django settings for web_kasal project.
 
@@ -81,12 +82,26 @@ WSGI_APPLICATION = 'web_kasal.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if os.environ.get("PGHOST"):
+    # Railway / production PostgreSQL
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("PGDATABASE"),
+            "USER": os.environ.get("PGUSER"),
+            "PASSWORD": os.environ.get("PGPASSWORD"),
+            "HOST": os.environ.get("PGHOST"),
+            "PORT": os.environ.get("PGPORT", "5432"),
+        }
     }
-}
+else:
+    # Local development
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
