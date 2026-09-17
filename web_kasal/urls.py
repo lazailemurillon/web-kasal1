@@ -32,8 +32,6 @@ urlpatterns = [
     path('staff/gowns/<int:gown_id>/update/',views.update_gown,name='update_gown'),
     path('reservations/cancel/<int:reservation_id>/',views.cancel_reservation,name='cancel_reservation'),
     path('staff/reservations/<int:reservation_id>/update/',views.update_reservation,name='update_reservation'),
-    path("api/find-similar-gowns-status/<str:job_id>/",views.find_similar_gowns_status,name="find_similar_gowns_status",),
-    path("api/fashionclip/callback/",views.fashionclip_callback,name="fashionclip_callback",),
 ]
 
 urlpatterns += static(
