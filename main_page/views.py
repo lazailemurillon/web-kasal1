@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
-from .fashionclip_service import find_similar_gowns
+#from .fashionclip_service import find_similar_gowns
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
@@ -870,96 +870,12 @@ def delete_gown(request, gown_id):
 @require_POST
 def find_similar_gowns_view(request):
 
-    # --------------------------------------------------------
-    # Make sure a photo was uploaded
-    # --------------------------------------------------------
-
-    uploaded_file = request.FILES.get("photo")
-
-    if not uploaded_file:
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "No photo was uploaded."
-            },
-            status=400
-        )
-
-    # --------------------------------------------------------
-    # Check file type
-    # --------------------------------------------------------
-
-    allowed_types = [
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    ]
-
-    if uploaded_file.content_type not in allowed_types:
-
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "Please upload a JPG, PNG, or WEBP image."
-            },
-            status=400
-        )
-
-    # --------------------------------------------------------
-    # Get gowns from database
-    # --------------------------------------------------------
-
-    gowns = Gown.objects.filter(
-        is_reserved=False
-    )
-
-    # --------------------------------------------------------
-    # Run FashionCLIP
-    # --------------------------------------------------------
-
-    try:
-
-        results = find_similar_gowns(
-            uploaded_file=uploaded_file,
-            gowns=gowns,
-            top_k=12
-        )
-
-    except Exception as e:
-
-        print("FashionCLIP error:", e)
-
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "Something went wrong while finding similar gowns."
-            },
-            status=500
-        )
-
-    # --------------------------------------------------------
-    # Extract gown IDs
-    # --------------------------------------------------------
-
-    gown_ids = [
-        result["id"]
-        for result in results
-    ]
-
-    # --------------------------------------------------------
-    # Return IDs + similarity scores
-    # --------------------------------------------------------
-    print("================================")
-    print("FASHIONCLIP RESULTS:")
-    print(results)
-    print("================================")
-
     return JsonResponse(
         {
-            "success": True,
-            "gown_ids": gown_ids,
-            "results": results
-        }
+            "success": False,
+            "error": "AI gown matching is temporarily unavailable."
+        },
+        status=503
     )
 
 #RESERVATION
