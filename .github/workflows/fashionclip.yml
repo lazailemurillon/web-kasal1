@@ -22,7 +22,7 @@ jobs:
           pip install fashion-clip==0.2.2
           pip install torch==2.13.0
           pip install transformers==4.30.2
-          pip install numpy==1.25.2
+          pip install numpy==1.26.4
           pip install Pillow==12.3.0
 
       - name: Test FashionCLIP
