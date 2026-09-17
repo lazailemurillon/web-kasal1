@@ -1,0 +1,68 @@
+[
+  {
+    "filename": "gown1_5DQMeTj.jpg",
+    "score": 1.000000101327896,
+    "fashion_score": 1.0000001192092896,
+    "color_score": 1.0
+  },
+  {
+    "filename": "gown1.jpg",
+    "score": 1.000000101327896,
+    "fashion_score": 1.0000001192092896,
+    "color_score": 1.0
+  },
+  {
+    "filename": "gown2_ctiugv8.jpg",
+    "score": 0.5496229261159896,
+    "fashion_score": 0.642953097820282,
+    "color_score": 0.020751953125
+  },
+  {
+    "filename": "gown2_0l0qaCG.jpg",
+    "score": 0.5496229261159896,
+    "fashion_score": 0.642953097820282,
+    "color_score": 0.020751953125
+  },
+  {
+    "filename": "gown2.jpg",
+    "score": 0.5496229261159896,
+    "fashion_score": 0.642953097820282,
+    "color_score": 0.020751953125
+  },
+  {
+    "filename": "gown5.jpg",
+    "score": 0.5346397995948792,
+    "fashion_score": 0.6225254535675049,
+    "color_score": 0.03662109375
+  },
+  {
+    "filename": "gown5_583dMoL.jpg",
+    "score": 0.5346397995948792,
+    "fashion_score": 0.6225254535675049,
+    "color_score": 0.03662109375
+  },
+  {
+    "filename": "gown4_1hvWpr1.jpg",
+    "score": 0.49526426792144773,
+    "fashion_score": 0.5680584907531738,
+    "color_score": 0.082763671875
+  },
+  {
+    "filename": "gown4.jpg",
+    "score": 0.49526426792144773,
+    "fashion_score": 0.5680584907531738,
+    "color_score": 0.082763671875
+  },
+  {
+    "filename": "gown3_Ys8fBvZ.jpg",
+    "score": 0.4105755299329758,
+    "fashion_score": 0.4730777144432068,
+    "color_score": 0.056396484375
+  },
+  {
+    "filename": "gown3.jpg",
+    "score": 0.4105755299329758,
+    "fashion_score": 0.4730777144432068,
+    "color_score": 0.056396484375
+  }
+]
