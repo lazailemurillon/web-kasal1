@@ -47,26 +47,32 @@ jobs:
         run: |
           python fashionclip_worker/run_fashionclip.py
 
-      - name: Send result to Django
+            - name: Send result to Django
         env:
-          DJANGO_CALLBACK_URL: ${{ secrets.DJANGO_CALLBACK_URL }}
+          DJANGO_CALLBACK_URL: https://web-kasal1-production.up.railway.app/api/fashionclip/callback/
           DJANGO_CALLBACK_SECRET: ${{ secrets.DJANGO_CALLBACK_SECRET }}
           JOB_ID: ${{ inputs.job_id }}
         run: |
           python - <<'PY'
           import os
+          import json
           import requests
 
           result_file = "fashionclip_worker/fashion_results.json"
 
           with open(result_file, "r", encoding="utf-8") as f:
-              result = f.read()
+              result = json.load(f)
+
+          callback_url = os.environ["DJANGO_CALLBACK_URL"]
+          callback_secret = os.environ["DJANGO_CALLBACK_SECRET"]
+
+          print(f"Sending result to: {callback_url}")
+          print(f"Job ID: {os.environ['JOB_ID']}")
 
           response = requests.post(
-              os.environ["DJANGO_CALLBACK_URL"],
+              callback_url,
               headers={
-                  "Authorization":
-                      f"Bearer {os.environ['DJANGO_CALLBACK_SECRET']}"
+                  "Authorization": f"Bearer {callback_secret}"
               },
               json={
                   "job_id": os.environ["JOB_ID"],
@@ -74,6 +80,9 @@ jobs:
               },
               timeout=60
           )
+
+          print(f"Django response: {response.status_code}")
+          print(response.text)
 
           response.raise_for_status()
 
