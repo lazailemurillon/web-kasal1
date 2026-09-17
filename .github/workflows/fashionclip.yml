@@ -2,6 +2,16 @@ name: FashionCLIP Worker
 
 on:
   workflow_dispatch:
+    inputs:
+      photo_path:
+        description: "Path of uploaded photo inside the repository"
+        required: true
+        type: string
+
+      job_id:
+        description: "Unique ID for this AI search"
+        required: true
+        type: string
 
 jobs:
   fashionclip:
@@ -26,11 +36,14 @@ jobs:
           pip install Pillow==12.3.0
 
       - name: Run FashionCLIP worker
+        env:
+          PHOTO_PATH: ${{ inputs.photo_path }}
         run: |
           python fashionclip_worker/run_fashionclip.py
 
-      - name: Upload embedding file
+      - name: Upload AI results
         uses: actions/upload-artifact@v4
         with:
-          name: gown-embeddings
-          path: fashionclip_worker/gown_embeddings.json
+          name: fashion-results-${{ inputs.job_id }}
+          path: fashionclip_worker/fashion_results.json
+          retention-days: 1
