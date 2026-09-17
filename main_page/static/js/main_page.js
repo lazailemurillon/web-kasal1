@@ -531,7 +531,9 @@ if (findGownsButton) {
                 if (!response.ok || !data.success) {
 
                     throw new Error(
-                        data.error || "Unable to start AI search."
+                        data.details
+                            ? `${data.error}: ${data.details}`
+                            : data.error || "Unable to start AI search."
                     );
                 }
 
