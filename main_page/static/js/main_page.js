@@ -498,9 +498,8 @@ if (findGownsButton) {
 
             const originalText = findGownsButton.textContent;
 
-            findGownsButton.textContent = "FINDING SIMILAR GOWNS...";
+            findGownsButton.textContent = "STARTING AI SEARCH...";
 
-            // Create form data
             const formData = new FormData();
 
             formData.append(
@@ -513,7 +512,7 @@ if (findGownsButton) {
                 // Get CSRF token
                 const csrfToken = getCookie("csrftoken");
 
-                // Send image to Django
+                // Start GitHub FashionCLIP job
                 const response = await fetch(
                     "/api/find-similar-gowns/",
                     {
@@ -529,32 +528,105 @@ if (findGownsButton) {
 
                 const data = await response.json();
 
-                // Check Django response
                 if (!response.ok || !data.success) {
 
                     throw new Error(
-                        data.error || "Something went wrong."
+                        data.error || "Unable to start AI search."
                     );
                 }
 
-                console.log(
-                    "Similar gown IDs:",
-                    data.gown_ids
-                );
+                const jobId = data.job_id;
 
                 console.log(
-                    "FashionCLIP results:",
-                    data.results
+                    "FashionCLIP job started:",
+                    jobId
                 );
 
-                // Filter catalog
-                filterGownCatalog(
-                    data.gown_ids
-                );
+                // Wait for GitHub Actions
+                findGownsButton.textContent = "AI IS SEARCHING...";
 
-                // Close modal
-                if (uploadModal) {
-                    uploadModal.classList.remove("active");
+                let completed = false;
+
+                while (!completed) {
+
+                    await new Promise(
+                        resolve => setTimeout(resolve, 5000)
+                    );
+
+                    const statusResponse = await fetch(
+                        `/api/find-similar-gowns-status/${jobId}/`
+                    );
+
+                    const statusData =
+                        await statusResponse.json();
+
+                    console.log(
+                        "AI job status:",
+                        statusData
+                    );
+
+                    if (
+                        !statusResponse.ok ||
+                        !statusData.success
+                    ) {
+
+                        throw new Error(
+                            statusData.error ||
+                            "AI search failed."
+                        );
+                    }
+
+                    if (
+                        statusData.status === "queued"
+                    ) {
+
+                        findGownsButton.textContent =
+                            "STARTING AI...";
+
+                    } else if (
+                        statusData.status === "running"
+                    ) {
+
+                        findGownsButton.textContent =
+                            "AI IS SEARCHING...";
+
+                    } else if (
+                        statusData.status === "completed"
+                    ) {
+
+                        completed = true;
+
+                        console.log(
+                            "Similar gown IDs:",
+                            statusData.gown_ids
+                        );
+
+                        console.log(
+                            "FashionCLIP results:",
+                            statusData.results
+                        );
+
+                        // Filter catalog
+                        filterGownCatalog(
+                            statusData.gown_ids
+                        );
+
+                        // Close modal
+                        if (uploadModal) {
+                            uploadModal.classList.remove(
+                                "active"
+                            );
+                        }
+
+                    } else if (
+                        statusData.status === "failed"
+                    ) {
+
+                        throw new Error(
+                            statusData.error ||
+                            "FashionCLIP search failed."
+                        );
+                    }
                 }
 
             } catch (error) {
@@ -574,49 +646,12 @@ if (findGownsButton) {
                 // Restore button
                 findGownsButton.disabled = false;
 
-                findGownsButton.textContent = originalText;
+                findGownsButton.textContent =
+                    originalText;
             }
         }
     );
 
-}
-/*
-==========================================
-GET DJANGO CSRF COOKIE
-==========================================
-*/
-
-function getCookie(name) {
-
-    let cookieValue = null;
-
-    if (document.cookie && document.cookie !== "") {
-
-        const cookies = document.cookie.split(";");
-
-        for (let i = 0; i < cookies.length; i++) {
-
-            const cookie = cookies[i].trim();
-
-            if (
-                cookie.substring(
-                    0,
-                    name.length + 1
-                ) === (name + "=")
-            ) {
-
-                cookieValue = decodeURIComponent(
-                    cookie.substring(
-                        name.length + 1
-                    )
-                );
-
-                break;
-            }
-        }
-    }
-
-    return cookieValue;
 }
 
 

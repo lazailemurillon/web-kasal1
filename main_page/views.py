@@ -11,6 +11,11 @@ from django.views.decorators.http import require_POST
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
+import os
+import uuid
+import base64
+import json
+import requests
 
 # Create your views here.
 
@@ -869,14 +874,275 @@ def delete_gown(request, gown_id):
 
 @require_POST
 def find_similar_gowns_view(request):
+    photo = request.FILES.get("photo")
 
-    return JsonResponse(
-        {
-            "success": False,
-            "error": "AI gown matching is temporarily unavailable."
-        },
-        status=503
-    )
+    if not photo:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Please upload a photo."
+            },
+            status=400
+        )
+
+    github_token = os.environ.get("GITHUB_TOKEN")
+
+    if not github_token:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "GitHub token is not configured."
+            },
+            status=500
+        )
+
+    job_id = uuid.uuid4().hex
+
+    extension = os.path.splitext(photo.name)[1].lower()
+
+    if extension not in [".jpg", ".jpeg", ".png", ".webp"]:
+        extension = ".jpg"
+
+    github_path = f"fashionclip_worker/uploads/{job_id}{extension}"
+
+    try:
+        photo_bytes = photo.read()
+        encoded_photo = base64.b64encode(photo_bytes).decode("utf-8")
+
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        github_url = (
+            f"https://api.github.com/repos/"
+            f"lazailemurillon/web-kasal1/contents/{github_path}"
+        )
+
+        upload_response = requests.put(
+            github_url,
+            headers=headers,
+            json={
+                "message": f"Upload AI photo {job_id}",
+                "content": encoded_photo,
+                "branch": "main",
+            },
+            timeout=60,
+        )
+
+        if upload_response.status_code not in [200, 201]:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Could not upload photo to GitHub.",
+                    "details": upload_response.text,
+                },
+                status=500
+            )
+
+        workflow_url = (
+            "https://api.github.com/repos/"
+            "lazailemurillon/web-kasal1/actions/workflows/"
+            "fashionclip.yml/dispatches"
+        )
+
+        workflow_response = requests.post(
+            workflow_url,
+            headers=headers,
+            json={
+                "ref": "main",
+                "inputs": {
+                    "photo_path": github_path,
+                    "job_id": job_id,
+                },
+            },
+            timeout=60,
+        )
+
+        if workflow_response.status_code != 204:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Could not start FashionCLIP workflow.",
+                    "details": workflow_response.text,
+                },
+                status=500
+            )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "job_id": job_id,
+                "status": "started",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": str(e),
+            },
+            status=500
+        )
+
+def find_similar_gowns_status(request, job_id):
+    github_token = os.environ.get("GITHUB_TOKEN")
+
+    if not github_token:
+        return JsonResponse(
+            {
+                "success": False,
+                "status": "error",
+                "error": "GitHub token is not configured."
+            },
+            status=500
+        )
+
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        runs_url = (
+            "https://api.github.com/repos/"
+            "lazailemurillon/web-kasal1/actions/workflows/"
+            "fashionclip.yml/runs"
+        )
+
+        response = requests.get(
+            runs_url,
+            headers=headers,
+            params={"per_page": 20},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "status": "error",
+                    "error": "Could not check GitHub Actions."
+                },
+                status=500
+            )
+
+        runs = response.json().get("workflow_runs", [])
+
+        target_run = None
+
+        for run in runs:
+            if run.get("display_title") == f"FashionCLIP {job_id}":
+                target_run = run
+                break
+
+        if not target_run:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "status": "queued",
+                    "job_id": job_id,
+                }
+            )
+
+        run_status = target_run.get("status")
+        conclusion = target_run.get("conclusion")
+
+        if run_status != "completed":
+            return JsonResponse(
+                {
+                    "success": True,
+                    "status": "running",
+                    "job_id": job_id,
+                }
+            )
+
+        if conclusion != "success":
+            return JsonResponse(
+                {
+                    "success": False,
+                    "status": "failed",
+                    "error": "FashionCLIP workflow failed."
+                }
+            )
+
+        result_path = f"fashionclip_worker/result_{job_id}.json"
+
+        result_url = (
+            "https://api.github.com/repos/"
+            "lazailemurillon/web-kasal1/contents/"
+            f"{result_path}"
+        )
+
+        result_response = requests.get(
+            result_url,
+            headers=headers,
+            timeout=30,
+        )
+
+        if result_response.status_code != 200:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "status": "running",
+                    "job_id": job_id,
+                }
+            )
+
+        result_data = result_response.json()
+
+        encoded_content = result_data.get("content", "")
+
+        if not encoded_content:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "status": "failed",
+                    "error": "FashionCLIP result is empty."
+                }
+            )
+
+        result_json = base64.b64decode(
+            encoded_content.replace("\n", "")
+        ).decode("utf-8")
+
+        results = json.loads(result_json)
+
+        gown_ids = []
+
+        for result in results:
+            filename = result.get("filename")
+
+            if not filename:
+                continue
+
+            for gown in Gown.objects.all():
+                if os.path.basename(gown.image.name) == filename:
+                    gown_ids.append(gown.id)
+                    break
+
+        return JsonResponse(
+            {
+                "success": True,
+                "status": "completed",
+                "job_id": job_id,
+                "gown_ids": gown_ids,
+                "results": results,
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {
+                "success": False,
+                "status": "error",
+                "error": str(e),
+            },
+            status=500
+        )
 
 #RESERVATION
 @login_required
