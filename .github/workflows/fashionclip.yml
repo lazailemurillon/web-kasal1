@@ -1,5 +1,7 @@
 name: FashionCLIP Worker
 
+run-name: FashionCLIP ${{ inputs.job_id }}
+
 on:
   workflow_dispatch:
     inputs:
